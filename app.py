@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 from datetime import datetime
 from pathlib import Path
@@ -132,18 +133,26 @@ def _init_session_state() -> None:
             st.session_state[key] = value
 
 
+def _clickable_logo(width: int = 200) -> None:
+    if not LOGO_PATH.is_file():
+        return
+    encoded = base64.b64encode(LOGO_PATH.read_bytes()).decode()
+    st.markdown(
+        f'<a href="{CREATOR_URL}" target="_blank" rel="noopener noreferrer">'
+        f'<img src="data:image/png;base64,{encoded}" width="{width}" '
+        f'style="cursor:pointer;" alt="{CREATOR_NAME}">'
+        f"</a>",
+        unsafe_allow_html=True,
+    )
+
+
 def _header() -> None:
     col_logo, col_title = st.columns([1, 3])
     with col_logo:
-        if LOGO_PATH.is_file():
-            st.image(str(LOGO_PATH), width=200)
-        st.markdown(f"[{CREATOR_NAME}]({CREATOR_URL})")
+        _clickable_logo()
     with col_title:
         st.title("House Finder — Age & Value Search")
-        st.caption(
-            f"Search US zip codes by house age and estimated value. "
-            f"Created by [{CREATOR_NAME}]({CREATOR_URL})."
-        )
+        st.caption("Search US zip codes by house age and estimated value.")
 
 
 def _sidebar() -> tuple[bool, bool, str]:
@@ -185,17 +194,6 @@ def _sidebar() -> tuple[bool, bool, str]:
     if not use_demo:
         st.sidebar.subheader("API usage")
         st.sidebar.caption(format_usage_status())
-
-    st.sidebar.divider()
-    st.sidebar.subheader("About")
-    st.sidebar.markdown(f"- Website: [{CREATOR_URL}]({CREATOR_URL})")
-    with st.sidebar.expander("API key help"):
-        st.markdown(
-            "**Option A — Enter in sidebar** (this page)\n\n"
-            "**Option B — Streamlit Cloud Secrets**\n"
-            "```toml\nRENTCAST_API_KEY = \"your_key\"\n```\n\n"
-            "**Option C — Local `.env` file** when running on your PC"
-        )
 
     return use_demo, force_refresh, _resolved_api_key()
 
