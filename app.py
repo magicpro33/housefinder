@@ -34,6 +34,13 @@ LOGO_PATH = ROOT / "assets" / "aiupscale_logo.png"
 
 load_dotenv(ROOT / ".env")
 
+st.set_page_config(
+    page_title="House Finder",
+    page_icon="🏠",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 
 def _apply_streamlit_secrets() -> None:
     """Load RentCast settings from Streamlit Cloud secrets (or local secrets.toml)."""
@@ -47,15 +54,21 @@ def _apply_streamlit_secrets() -> None:
         pass
 
 
-st.set_page_config(
-    page_title="House Finder",
-    page_icon="🏠",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+def _env_api_key() -> str:
+    return os.environ.get("RENTCAST_API_KEY", "").strip()
+
+
+def _resolved_api_key() -> str:
+    """Sidebar entry overrides Streamlit secrets / .env for this session."""
+    entered = st.session_state.get("api_key_input", "").strip()
+    if entered:
+        return entered
+    return _env_api_key()
 
 
 def _source_label(source: str) -> str:
+    if source == "demo":
+        return "demo"
     if source == "rentcast-cache":
         return "RentCast (cached)"
     return "RentCast"
@@ -89,8 +102,14 @@ def _build_map(houses: list[House]) -> folium.Map | None:
             f"Built: {house.year_built} ({house.age_years} yr)<br>"
             f"Est. value: ${house.estimated_value:,}"
         )
-        folium.Marker(
+        folium.CircleMarker(
             location=[house.latitude, house.longitude],
+            radius=9,
+            color="#b91c1c",
+            weight=2,
+            fill=True,
+            fill_color="#ef4444",
+            fill_opacity=0.85,
             popup=folium.Popup(popup_html, max_width=320),
             tooltip=house.address,
         ).add_to(fmap)
@@ -98,12 +117,15 @@ def _build_map(houses: list[House]) -> folium.Map | None:
 
 
 def _init_session_state() -> None:
+    has_key = bool(_env_api_key())
     defaults = {
         "raw_houses": [],
         "houses": [],
         "source": "",
         "zip_code": "29209",
         "search_logs": [],
+        "api_key_input": "",
+        "use_demo": not has_key,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -124,39 +146,65 @@ def _header() -> None:
         )
 
 
-def _sidebar() -> bool:
+def _sidebar() -> tuple[bool, bool, str]:
     st.sidebar.header("Settings")
-    force_refresh = st.sidebar.checkbox(
-        "Force refresh from API (ignore cache)",
-        value=False,
-        help="Next search re-downloads data for that zip and uses API credits.",
+
+    use_demo = st.sidebar.checkbox(
+        "Use demo data (no API)",
+        value=st.session_state.use_demo,
+        help="Sample homes geocoded to your zip — no RentCast key needed.",
     )
+    st.session_state.use_demo = use_demo
+
+    st.sidebar.subheader("RentCast API key")
+    if not use_demo:
+        st.sidebar.text_input(
+            "Enter API key",
+            type="password",
+            key="api_key_input",
+            placeholder="Paste your RentCast key here",
+            help="Stored in this browser session only. Or set RENTCAST_API_KEY in Streamlit Secrets.",
+        )
+        if _resolved_api_key():
+            st.sidebar.success("API key ready for live search.")
+        else:
+            st.sidebar.warning("Enter an API key or enable demo mode.")
+    else:
+        st.sidebar.caption("Demo mode — API key not required.")
+        st.sidebar.markdown("[Get a free RentCast key](https://app.rentcast.io/app/api)")
+
+    force_refresh = False
+    if not use_demo:
+        force_refresh = st.sidebar.checkbox(
+            "Force refresh from API (ignore cache)",
+            value=False,
+            help="Next search re-downloads data for that zip and uses API credits.",
+        )
+
     st.sidebar.divider()
-    st.sidebar.subheader("API usage")
-    st.sidebar.caption(format_usage_status())
-    st.sidebar.markdown(
-        "Get a free key at [RentCast](https://app.rentcast.io/app/api) "
-        "and add `RENTCAST_API_KEY` to `.env` in this folder."
-    )
+    if not use_demo:
+        st.sidebar.subheader("API usage")
+        st.sidebar.caption(format_usage_status())
+
     st.sidebar.divider()
     st.sidebar.subheader("About")
-    st.sidebar.markdown(f"- [User guide]({CREATOR_URL})")
     st.sidebar.markdown(f"- Website: [{CREATOR_URL}]({CREATOR_URL})")
-    with st.sidebar.expander("API key setup"):
+    with st.sidebar.expander("API key help"):
         st.markdown(
-            "1. Sign up at https://app.rentcast.io/app/api\n"
-            "2. Create `.env` in the project folder\n"
-            "3. Add: `RENTCAST_API_KEY=your_key_here`\n"
-            "4. Restart this app"
+            "**Option A — Enter in sidebar** (this page)\n\n"
+            "**Option B — Streamlit Cloud Secrets**\n"
+            "```toml\nRENTCAST_API_KEY = \"your_key\"\n```\n\n"
+            "**Option C — Local `.env` file** when running on your PC"
         )
-    return force_refresh
+
+    return use_demo, force_refresh, _resolved_api_key()
 
 
 def main() -> None:
     _apply_streamlit_secrets()
     _init_session_state()
     _header()
-    force_refresh = _sidebar()
+    use_demo, force_refresh, api_key = _sidebar()
 
     st.subheader("Search")
     c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
@@ -171,8 +219,10 @@ def main() -> None:
         st.write("")
         run_search = st.button("Search", type="primary", use_container_width=True)
 
-    st.caption(f"Shows homes aged {AGE_MIN}–{AGE_MAX} years. Requires RentCast API key in `.env`.")
-    st.caption(format_usage_status())
+    mode = "demo mode" if use_demo else "RentCast live data"
+    st.caption(f"Shows homes aged {AGE_MIN}–{AGE_MAX} years. Current mode: **{mode}**.")
+    if not use_demo:
+        st.caption(format_usage_status())
 
     v1, v2 = st.columns(2)
     with v1:
@@ -192,12 +242,14 @@ def main() -> None:
             logs: list[str] = [f"--- Search zip {zip_code} ---"]
             with st.spinner("Searching…"):
                 try:
-                    filtered, source, raw, limit_notify = search_houses(
+                    filtered, source, raw, _limit_notify = search_houses(
                         zip_code,
                         int(min_age),
                         int(max_age),
                         min_v,
                         max_v,
+                        use_demo=use_demo,
+                        api_key=api_key or None,
                         log=logs.append,
                         force_refresh=force_refresh,
                     )
@@ -220,7 +272,7 @@ def main() -> None:
         )
         st.session_state.houses = filtered
 
-    if should_show_limit_notice():
+    if not use_demo and should_show_limit_notice():
         st.warning(
             f"You have used {get_month_usage()[1]} of {monthly_limit()} RentCast API requests "
             "this month. Additional requests may be billed until the counter resets next month. "
@@ -230,7 +282,7 @@ def main() -> None:
 
     houses: list[House] = st.session_state.houses
     if not houses and not st.session_state.search_logs:
-        st.info("Enter a zip code and click **Search** to load properties.")
+        st.info("Enter a zip code and click **Search**. Enable **demo mode** in the sidebar to try without an API key.")
         return
 
     if st.session_state.search_logs:
@@ -244,9 +296,9 @@ def main() -> None:
     source_label = _source_label(st.session_state.source)
     st.success(f"Showing **{len(houses)}** homes — source: **{source_label}**")
 
-    tab_list, tab_map = st.tabs(["Address list", "Map"])
-
-    with tab_list:
+    col_list, col_map = st.columns([1, 1])
+    with col_list:
+        st.subheader("Addresses")
         st.dataframe(_houses_to_dataframe(houses), use_container_width=True, hide_index=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M")
         filename = f"houses_{st.session_state.zip_code}_{stamp}.txt"
@@ -263,10 +315,19 @@ def main() -> None:
             type="secondary",
         )
 
-    with tab_map:
+    with col_map:
+        st.subheader("Map")
+        st.caption("Click pins for address, year built, and estimated value.")
         fmap = _build_map(houses)
         if fmap is not None:
-            st_folium(fmap, width=None, height=500, returned_objects=[])
+            st_folium(
+                fmap,
+                width=None,
+                height=550,
+                use_container_width=True,
+                returned_objects=[],
+                key=f"map-{st.session_state.zip_code}-{len(houses)}",
+            )
 
 
 if __name__ == "__main__":

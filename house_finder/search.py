@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import Callable
 
+from house_finder.demo import generate_demo_houses
 from house_finder.filters import filter_houses
 from house_finder.models import House
 from house_finder.rentcast import fetch_properties_by_zip
@@ -11,19 +12,32 @@ from house_finder.rentcast import fetch_properties_by_zip
 def fetch_houses_in_zip(
     zip_code: str,
     *,
+    use_demo: bool = False,
     api_key: str | None = None,
+    min_age: int = 20,
+    max_age: int = 40,
     log: Callable[[str], None] | None = None,
     force_refresh: bool = False,
 ) -> tuple[list[House], str, bool]:
+    """Load properties for a zip (demo or RentCast).
+
+    Returns (houses, source_label, api_limit_notify).
+    """
     zip_code = zip_code.strip()
     if len(zip_code) != 5 or not zip_code.isdigit():
         raise ValueError("Enter a valid 5-digit US zip code.")
 
+    if use_demo:
+        if log:
+            log("Using demo data (demo mode enabled).")
+        raw = generate_demo_houses(zip_code, min_age=min_age, max_age=max_age)
+        return raw, "demo", False
+
     key = (api_key or os.environ.get("RENTCAST_API_KEY", "")).strip()
     if not key:
         raise ValueError(
-            "RentCast API key required. Add RENTCAST_API_KEY to .env or get a free key at "
-            "https://app.rentcast.io/app/api"
+            "RentCast API key required. Enter a key in the sidebar, add Streamlit Secrets, "
+            "or enable demo mode. Free key: https://app.rentcast.io/app/api"
         )
 
     if log:
@@ -42,10 +56,12 @@ def search_houses(
     min_value: int | None,
     max_value: int | None,
     *,
+    use_demo: bool = False,
     api_key: str | None = None,
     log: Callable[[str], None] | None = None,
     force_refresh: bool = False,
 ) -> tuple[list[House], str, list[House], bool]:
+    """Fetch properties in zip and apply age/value filters."""
     if min_age < 0 or max_age < 0:
         raise ValueError("House age must be zero or greater.")
     if min_age > max_age:
@@ -53,7 +69,10 @@ def search_houses(
 
     raw, source, api_limit_notify = fetch_houses_in_zip(
         zip_code,
+        use_demo=use_demo,
         api_key=api_key,
+        min_age=min_age,
+        max_age=max_age,
         log=log,
         force_refresh=force_refresh,
     )

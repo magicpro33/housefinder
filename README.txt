@@ -40,8 +40,9 @@ Created by AIupscale — https://aiupscalellc.netlify.app/
 --------------------------------------------------------------------------------
 
   - Zip code search with age range (20–100 years) and value filters
-  - RentCast live property data (year built, value, coordinates)
-  - Local cache per zip (data\cache\) — re-searching same zip skips API
+  - Demo mode (sample homes, no API key) or RentCast live data
+  - Enter API key in the sidebar OR Streamlit Secrets OR local .env
+  - Local cache per zip (data\cache\) when running on your PC
   - Monthly API request counter (data\api_usage.json)
   - Force refresh option in sidebar (ignore cache)
   - Download results as .txt file
@@ -95,13 +96,14 @@ Created by AIupscale — https://aiupscalellc.netlify.app/
      - Click "Advanced settings" → Python 3.10 or 3.11 if needed
      - Deploy
 
-  4. ADD SECRETS (required for searches to work)
+  4. ADD SECRETS (optional if users enter key in the app sidebar)
      - Open your app on Streamlit Cloud → Manage app → Settings → Secrets
-     - Paste (with your real key):
+     - Paste (with your real key) to pre-fill for all visitors:
 
          RENTCAST_API_KEY = "your_actual_key_here"
          RENTCAST_MONTHLY_LIMIT = "50"
 
+     - Or leave secrets empty and let each user paste their own key in the sidebar
      - Save — the app will reboot automatically
 
   5. YOUR PUBLIC URL
