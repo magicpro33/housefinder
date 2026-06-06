@@ -32,6 +32,9 @@ ROOT = Path(__file__).resolve().parent
 CREATOR_NAME = "AIupscale"
 CREATOR_URL = "https://aiupscalellc.netlify.app/"
 LOGO_PATH = ROOT / "assets" / "aiupscale_logo.png"
+LOGO_BG = "#081325"
+LOGO_BG_PANEL = "#0c1829"
+LOGO_TEXT = "#F6F4E9"
 
 load_dotenv(ROOT / ".env")
 
@@ -41,6 +44,37 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+def _inject_theme_css() -> None:
+    st.markdown(
+        f"""
+        <style>
+            .stApp {{
+                background-color: {LOGO_BG};
+                color: {LOGO_TEXT};
+            }}
+            [data-testid="stSidebar"] {{
+                background-color: {LOGO_BG_PANEL};
+                color: {LOGO_TEXT};
+            }}
+            [data-testid="stHeader"] {{
+                background-color: transparent;
+            }}
+            h1, h2, h3, h4, h5, h6,
+            p, label, span, li,
+            .stMarkdown, .stCaption,
+            [data-testid="stMarkdownContainer"] p,
+            [data-testid="stWidgetLabel"] {{
+                color: {LOGO_TEXT} !important;
+            }}
+            .stExpander details summary {{
+                color: {LOGO_TEXT};
+            }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _apply_streamlit_secrets() -> None:
@@ -200,6 +234,7 @@ def _sidebar() -> tuple[bool, bool, str]:
 
 def main() -> None:
     _apply_streamlit_secrets()
+    _inject_theme_css()
     _init_session_state()
     _header()
     use_demo, force_refresh, api_key = _sidebar()
