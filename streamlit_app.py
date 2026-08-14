@@ -441,6 +441,17 @@ link_frame["Address"] = [
 link_frame["Estimated value"] = link_frame["Estimated value"].map(
     lambda v: f"${int(v):,}" if pd.notna(v) else "—"
 )
+for column in ("Beds", "Sq. ft."):
+    link_frame[column] = link_frame[column].map(
+        lambda v: f"{int(v):,}" if pd.notna(v) else "—"
+    )
+for column in ("Year built", "Age"):
+    link_frame[column] = link_frame[column].map(
+        lambda v: f"{int(v)}" if pd.notna(v) else "—"
+    )
+link_frame["Baths"] = link_frame["Baths"].map(
+    lambda v: (f"{v:g}" if pd.notna(v) else "—")
+)
 
 st.subheader("Matching properties")
 st.caption("Click an address to open that home on Zillow.")
