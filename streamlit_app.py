@@ -23,7 +23,12 @@ LOGO_PATH = ROOT / "assets" / "aiupscale_logo.png"
 CREATOR_URL = "https://aiupscalellc.netlify.app/"
 load_dotenv(ROOT / ".env")
 
-st.set_page_config(page_title="Client finder", page_icon="🏠", layout="wide")
+st.set_page_config(
+    page_title="Client finder",
+    page_icon="🏠",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
 
 def _zillow_url(address: str, city: str = "", state: str = "", zip_code: str = "") -> str:
@@ -158,15 +163,12 @@ def _run_search(
 
 
 def _build_folium_map(houses: list[House]) -> folium.Map:
-    """Map with large permanent street-name labels on each pin."""
+    """Map with street labels; permanent labels hide on phone via CSS."""
     lats = [h.latitude for h in houses]
     lons = [h.longitude for h in houses]
     center = [sum(lats) / len(lats), sum(lons) / len(lons)]
-    fmap = folium.Map(location=center, zoom_start=13, tiles="OpenStreetMap")
-
-    # Slightly higher default zoom so basemap street names render larger.
-    if len(houses) == 1:
-        fmap = folium.Map(location=center, zoom_start=16, tiles="OpenStreetMap")
+    zoom = 16 if len(houses) == 1 else 13
+    fmap = folium.Map(location=center, zoom_start=zoom, tiles="OpenStreetMap")
 
     for house in houses:
         label = _street_label(house.address)
@@ -185,16 +187,17 @@ def _build_folium_map(houses: list[House]) -> folium.Map:
         )
         folium.Marker(
             location=[house.latitude, house.longitude],
-            popup=folium.Popup(popup_html, max_width=320),
+            popup=folium.Popup(popup_html, max_width=260),
             tooltip=folium.Tooltip(tip_html, permanent=True, sticky=False),
             icon=folium.Icon(color="orange", icon="home", prefix="fa"),
         ).add_to(fmap)
 
-    # Fit bounds with padding so labels stay readable
     if len(houses) > 1:
-        fmap.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]], padding=(30, 30))
+        fmap.fit_bounds(
+            [[min(lats), min(lons)], [max(lats), max(lons)]],
+            padding=(20, 20),
+        )
 
-    # CSS bump for Folium permanent tooltips (street names on map)
     fmap.get_root().html.add_child(
         folium.Element(
             """
@@ -207,11 +210,147 @@ def _build_folium_map(houses: list[House]) -> folium.Map:
               box-shadow: 0 2px 8px rgba(0,0,0,.25) !important;
               opacity: 0.95 !important;
             }
+            @media (max-width: 768px) {
+              .leaflet-tooltip.leaflet-tooltip-permanent { display: none !important; }
+            }
             </style>
             """
         )
     )
     return fmap
+
+
+def _inject_mobile_css() -> None:
+    """Tighten spacing, stack header, and switch results to cards on phones."""
+    _render_html(
+        """
+        <style>
+        /* Slightly tighter Streamlit chrome on small screens */
+        @media (max-width: 768px) {
+          .block-container {
+            padding-top: 1rem !important;
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+            padding-bottom: 2rem !important;
+            max-width: 100% !important;
+          }
+          h1 { font-size: 1.55rem !important; line-height: 1.25 !important; }
+          [data-testid="stMetricValue"] { font-size: 1.15rem !important; }
+          [data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
+          .cf-logo img { max-width: 120px !important; }
+          .cf-disclaimer { font-size: 0.78rem !important; line-height: 1.35 !important; }
+          .house-table-wrap { display: none !important; }
+          .house-cards { display: flex !important; }
+          .cf-map-hint-desktop { display: none !important; }
+          .cf-map-hint-mobile { display: block !important; }
+          iframe[title="streamlit_folium.st_folium"],
+          div[data-testid="stVerticalBlock"] iframe {
+            max-height: 280px !important;
+          }
+        }
+        @media (min-width: 769px) {
+          .house-cards { display: none !important; }
+          .house-table-wrap { display: block !important; }
+          .cf-map-hint-desktop { display: block !important; }
+          .cf-map-hint-mobile { display: none !important; }
+        }
+        .house-cards {
+          display: none;
+          flex-direction: column;
+          gap: 0.65rem;
+        }
+        .house-card {
+          border: 1px solid #233;
+          border-radius: 10px;
+          padding: 0.85rem 0.95rem;
+          background: #0c1829;
+        }
+        .house-card a {
+          color: #4da3ff;
+          font-weight: 650;
+          text-decoration: underline;
+          font-size: 1rem;
+          line-height: 1.3;
+          word-break: break-word;
+        }
+        .house-card .meta {
+          margin-top: 0.35rem;
+          color: #c9d4e3;
+          font-size: 0.88rem;
+          line-height: 1.4;
+        }
+        .house-card .price {
+          margin-top: 0.45rem;
+          color: #F6F4E9;
+          font-size: 1.05rem;
+          font-weight: 700;
+        }
+        .house-scroll {
+          max-height: min(520px, 70vh);
+          overflow: auto;
+          -webkit-overflow-scrolling: touch;
+          border: 1px solid #233;
+          border-radius: 8px;
+        }
+        .house-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 0.9rem;
+        }
+        .house-table th {
+          position: sticky;
+          top: 0;
+          background: #0c1829;
+          color: #F6F4E9;
+          text-align: left;
+          padding: 8px;
+          border-bottom: 1px solid #334;
+          white-space: nowrap;
+        }
+        .house-table td {
+          padding: 8px;
+          border-bottom: 1px solid #1c2a3f;
+          color: #F6F4E9;
+        }
+        .house-table tr:hover td { background: #122038; }
+        </style>
+        """
+    )
+
+
+def _results_cards_html(frame: pd.DataFrame) -> str:
+    """Compact tap-friendly property cards for phone layouts."""
+    cards: list[str] = []
+    for _, row in frame.iterrows():
+        addr = html.escape(str(row["Address"]))
+        url = html.escape(str(row["Zillow"]), quote=True)
+        city = html.escape(str(row.get("City") or ""))
+        state = html.escape(str(row.get("State") or ""))
+        zip_code = html.escape(str(row.get("ZIP") or ""))
+        age = row.get("Age")
+        year = row.get("Year built")
+        value = row.get("Estimated value")
+        ptype = html.escape(str(row.get("Property type") or "—"))
+        beds = row.get("Beds")
+        baths = row.get("Baths")
+        sqft = row.get("Sq. ft.")
+
+        value_txt = f"${int(value):,}" if pd.notna(value) else "—"
+        age_txt = f"{int(age)} yr" if pd.notna(age) else "—"
+        year_txt = f"{int(year)}" if pd.notna(year) else "—"
+        beds_txt = f"{int(beds)}" if pd.notna(beds) else "—"
+        baths_txt = f"{baths:g}" if pd.notna(baths) else "—"
+        sqft_txt = f"{int(sqft):,} sqft" if pd.notna(sqft) else "—"
+
+        cards.append(
+            "<div class='house-card'>"
+            f"<a href='{url}' target='_blank' rel='noopener noreferrer'>{addr}</a>"
+            f"<div class='meta'>{city}, {state} {zip_code} · {ptype}</div>"
+            f"<div class='price'>{value_txt} · {age_txt} · built {year_txt}</div>"
+            f"<div class='meta'>{beds_txt} bd · {baths_txt} ba · {sqft_txt}</div>"
+            "</div>"
+        )
+    return f"<div class='house-cards'>{''.join(cards)}</div>"
 
 
 def _render_html(markup: str) -> None:
@@ -251,7 +390,7 @@ def _clickable_logo_html(path: Path, url: str, *, max_width: int = 220) -> str:
 
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return (
-        f'<div style="text-align:right;margin-top:0.35rem">'
+        f'<div class="cf-logo" style="text-align:right;margin-top:0.35rem">'
         f'<a href="{url}" target="_blank" rel="noopener noreferrer" title="AI Upscale">'
         f'<img src="data:image/png;base64,{encoded}" alt="AI Upscale" '
         f'style="max-width:{max_width}px;width:100%;height:auto;" />'
@@ -259,21 +398,25 @@ def _clickable_logo_html(path: Path, url: str, *, max_width: int = 220) -> str:
     )
 
 
+_inject_mobile_css()
+
 # ── Header with clickable logo ──────────────────────────────────────────────
 header_left, header_right = st.columns([3, 1])
 with header_left:
     st.title("🏠 Client finder")
-    st.caption("Search houses by ZIP code, age, and estimated value.")
+    st.caption("Search houses by ZIP, age, and estimated value. On phones, open ☰ for filters.")
 with header_right:
     if LOGO_PATH.is_file():
-        st.markdown(_clickable_logo_html(LOGO_PATH, CREATOR_URL), unsafe_allow_html=True)
+        st.markdown(_clickable_logo_html(LOGO_PATH, CREATOR_URL, max_width=160), unsafe_allow_html=True)
     else:
         st.markdown(f"[AI Upscale]({CREATOR_URL})")
 
-st.caption(
-    "**Disclaimer:** Estimated values are rough guesses from tax assessments and last-sale "
-    "records. They are often inaccurate (sometimes far too low or high) and are **not** "
-    "appraisals, Zestimates, or market value. Always verify prices on Zillow or with a realtor."
+st.markdown(
+    '<p class="cf-disclaimer"><strong>Disclaimer:</strong> Estimated values are rough guesses '
+    "from tax assessments and last-sale records. They are often inaccurate (sometimes far too "
+    "low or high) and are <strong>not</strong> appraisals, Zestimates, or market value. "
+    "Always verify prices on Zillow or with a realtor.</p>",
+    unsafe_allow_html=True,
 )
 
 zip_options = _cached_zip_options(_cache_dir_signature())
@@ -427,15 +570,27 @@ if not results:
     st.stop()
 
 frame = _houses_frame(results).sort_values(["Estimated value", "Address"])
-summary_cols = st.columns(4)
-summary_cols[0].metric("Matching homes", f"{len(frame):,}")
-summary_cols[1].metric("Median value", f"${frame['Estimated value'].median():,.0f}")
-summary_cols[2].metric("Median age", f"{frame['Age'].median():,.0f} years")
-summary_cols[3].metric("Location", location or search_zip)
+row1 = st.columns(2)
+row2 = st.columns(2)
+row1[0].metric("Matching homes", f"{len(frame):,}")
+row1[1].metric("Median value", f"${frame['Estimated value'].median():,.0f}")
+row2[0].metric("Median age", f"{frame['Age'].median():,.0f} years")
+row2[1].metric("Location", location or search_zip)
 
 st.subheader("Map")
-st.caption("Street names are shown as large labels on each pin. Zoom in for larger basemap names.")
-st_folium(_build_folium_map(results), width=None, height=480, returned_objects=[])
+st.markdown(
+    '<p class="cf-map-hint-desktop">Street names are shown as labels on each pin. '
+    "Zoom in for larger basemap names.</p>"
+    '<p class="cf-map-hint-mobile">Tap a pin for address, value, and Zillow link.</p>',
+    unsafe_allow_html=True,
+)
+st_folium(
+    _build_folium_map(results),
+    width=None,
+    height=360,
+    returned_objects=[],
+    use_container_width=True,
+)
 
 display_frame = frame.drop(columns=["Latitude", "Longitude"])
 link_frame = display_frame.drop(columns=["Zillow"]).copy()
@@ -462,30 +617,24 @@ link_frame["Baths"] = link_frame["Baths"].map(
 
 st.subheader("Matching properties")
 st.caption(
-    "Click an address to open that home on Zillow. "
+    "Tap an address to open that home on Zillow. "
     "Estimated values can be way off — treat them as a rough filter only."
 )
 table_html = link_frame.to_html(
     escape=False, index=False, border=0, classes="house-table"
 )
 _render_html(
-    "<style>"
-    ".house-table{width:100%;border-collapse:collapse;font-size:0.9rem;}"
-    ".house-table th{position:sticky;top:0;background:#0c1829;color:#F6F4E9;"
-    "text-align:left;padding:8px;border-bottom:1px solid #334;white-space:nowrap;}"
-    ".house-table td{padding:8px;border-bottom:1px solid #1c2a3f;color:#F6F4E9;}"
-    ".house-table tr:hover td{background:#122038;}"
-    ".house-scroll{max-height:520px;overflow:auto;border:1px solid #233;border-radius:8px;}"
-    "</style>"
-    f'<div class="house-scroll">{table_html}</div>'
+    _results_cards_html(display_frame)
+    + f'<div class="house-table-wrap"><div class="house-scroll">{table_html}</div></div>'
 )
 
 csv_frame = display_frame.drop(columns=["Zillow"])
 st.download_button(
     "Download results as CSV",
     data=csv_frame.to_csv(index=False).encode("utf-8"),
-    file_name=f"house-finder-{search_zip}.csv",
+    file_name=f"client-finder-{search_zip}.csv",
     mime="text/csv",
+    use_container_width=True,
 )
 
 if zip_info:
