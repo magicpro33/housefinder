@@ -225,19 +225,55 @@ def _inject_mobile_css() -> None:
     _render_html(
         """
         <style>
+        .cf-logo {
+          text-align: center;
+          margin: 0.15rem 0 0.35rem 0;
+        }
+        .cf-logo img {
+          display: inline-block;
+          max-width: 180px;
+          width: min(180px, 55vw);
+          height: auto;
+        }
+        .cf-title {
+          text-align: center;
+          font-size: clamp(1.35rem, 6vw, 2.25rem) !important;
+          line-height: 1.2 !important;
+          margin: 0.15rem 0 0.25rem 0 !important;
+          padding: 0 !important;
+          word-wrap: break-word;
+          overflow-wrap: anywhere;
+          white-space: normal !important;
+          max-width: 100%;
+        }
+        .cf-subtitle {
+          text-align: center;
+          color: rgba(250,250,250,0.7);
+          font-size: 0.9rem;
+          margin: 0 0 0.5rem 0;
+          line-height: 1.35;
+        }
+        .cf-disclaimer {
+          text-align: left;
+          margin: 0.25rem 0 0.75rem 0;
+          line-height: 1.4;
+        }
         /* Slightly tighter Streamlit chrome on small screens */
         @media (max-width: 768px) {
           .block-container {
-            padding-top: 1rem !important;
-            padding-left: 0.75rem !important;
-            padding-right: 0.75rem !important;
+            padding-top: 0.75rem !important;
+            padding-left: 0.7rem !important;
+            padding-right: 0.7rem !important;
             padding-bottom: 2rem !important;
             max-width: 100% !important;
           }
-          h1 { font-size: 1.55rem !important; line-height: 1.25 !important; }
+          /* Hide Streamlit's default title overflow from other widgets */
+          h1 { font-size: 1.35rem !important; line-height: 1.2 !important; }
+          .cf-title { font-size: 1.45rem !important; }
+          .cf-logo img { max-width: 130px !important; width: min(130px, 50vw) !important; }
+          .cf-subtitle { font-size: 0.8rem !important; }
           [data-testid="stMetricValue"] { font-size: 1.15rem !important; }
           [data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
-          .cf-logo img { max-width: 120px !important; }
           .cf-disclaimer { font-size: 0.78rem !important; line-height: 1.35 !important; }
           .house-table-wrap { display: none !important; }
           .house-cards { display: flex !important; }
@@ -385,12 +421,12 @@ def _fetch_zip_from_api(zip_code: str) -> tuple[bool, str]:
     return True, f"Fetched {len(houses)} homes for {zip_code}."
 
 
-def _clickable_logo_html(path: Path, url: str, *, max_width: int = 220) -> str:
+def _clickable_logo_html(path: Path, url: str, *, max_width: int = 180) -> str:
     import base64
 
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return (
-        f'<div class="cf-logo" style="text-align:right;margin-top:0.35rem">'
+        f'<div class="cf-logo">'
         f'<a href="{url}" target="_blank" rel="noopener noreferrer" title="AI Upscale">'
         f'<img src="data:image/png;base64,{encoded}" alt="AI Upscale" '
         f'style="max-width:{max_width}px;width:100%;height:auto;" />'
@@ -400,16 +436,22 @@ def _clickable_logo_html(path: Path, url: str, *, max_width: int = 220) -> str:
 
 _inject_mobile_css()
 
-# ── Header with clickable logo ──────────────────────────────────────────────
-header_left, header_right = st.columns([3, 1])
-with header_left:
-    st.title("🏠 Client finder")
-    st.caption("Search houses by ZIP, age, and estimated value. On phones, open ☰ for filters.")
-with header_right:
-    if LOGO_PATH.is_file():
-        st.markdown(_clickable_logo_html(LOGO_PATH, CREATOR_URL, max_width=160), unsafe_allow_html=True)
-    else:
-        st.markdown(f"[AI Upscale]({CREATOR_URL})")
+# ── Header: stacked so the title never gets clipped on phones ───────────────
+if LOGO_PATH.is_file():
+    st.markdown(_clickable_logo_html(LOGO_PATH, CREATOR_URL), unsafe_allow_html=True)
+else:
+    st.markdown(
+        f'<p class="cf-logo"><a href="{CREATOR_URL}" target="_blank" '
+        f'rel="noopener noreferrer">AI Upscale</a></p>',
+        unsafe_allow_html=True,
+    )
+
+st.markdown(
+    '<h1 class="cf-title">🏠 Client finder</h1>'
+    '<p class="cf-subtitle">Search houses by ZIP, age, and estimated value. '
+    "On phones, open ☰ for filters.</p>",
+    unsafe_allow_html=True,
+)
 
 st.markdown(
     '<p class="cf-disclaimer"><strong>Disclaimer:</strong> Estimated values are rough guesses '
