@@ -1,4 +1,4 @@
-"""Streamlit deployment entry point for House Finder."""
+"""Streamlit deployment entry point for Client finder."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ LOGO_PATH = ROOT / "assets" / "aiupscale_logo.png"
 CREATOR_URL = "https://aiupscalellc.netlify.app/"
 load_dotenv(ROOT / ".env")
 
-st.set_page_config(page_title="House Finder", page_icon="🏠", layout="wide")
+st.set_page_config(page_title="Client finder", page_icon="🏠", layout="wide")
 
 
 def _zillow_url(address: str, city: str = "", state: str = "", zip_code: str = "") -> str:
@@ -262,7 +262,7 @@ def _clickable_logo_html(path: Path, url: str, *, max_width: int = 220) -> str:
 # ── Header with clickable logo ──────────────────────────────────────────────
 header_left, header_right = st.columns([3, 1])
 with header_left:
-    st.title("🏠 House Finder")
+    st.title("🏠 Client finder")
     st.caption("Search houses by ZIP code, age, and estimated value.")
 with header_right:
     if LOGO_PATH.is_file():
@@ -270,9 +270,18 @@ with header_right:
     else:
         st.markdown(f"[AI Upscale]({CREATOR_URL})")
 
+st.caption(
+    "**Disclaimer:** Estimated values are rough guesses from tax assessments and last-sale "
+    "records. They are often inaccurate (sometimes far too low or high) and are **not** "
+    "appraisals, Zestimates, or market value. Always verify prices on Zillow or with a realtor."
+)
+
 zip_options = _cached_zip_options(_cache_dir_signature())
 zip_by_label = {label: zip_code for zip_code, label in zip_options}
 labels = [label for _, label in zip_options]
+
+fetch_clicked = False
+api_zip = ""
 
 with st.sidebar:
     st.header("Search")
@@ -303,38 +312,36 @@ with st.sidebar:
         step=25_000,
     )
 
-    st.divider()
-    st.subheader("RentCast API key")
-    has_configured = bool(_configured_api_key())
-    st.text_input(
-        "API key",
-        type="password",
-        key="rentcast_api_key_input",
-        placeholder="Paste key here (optional if set in secrets)",
-        help="Used for live/refresh searches. Prefer Streamlit secrets for production.",
-    )
-    if has_configured and not str(st.session_state.get("rentcast_api_key_input", "")).strip():
-        st.caption("Using API key from Streamlit secrets / environment.")
-    elif _rentcast_key():
-        st.caption("API key ready for live searches.")
-    else:
-        st.caption("Cached ZIP searches work without a key.")
+    with st.expander("RentCast API / fetch a ZIP", expanded=False):
+        has_configured = bool(_configured_api_key())
+        st.text_input(
+            "API key",
+            type="password",
+            key="rentcast_api_key_input",
+            placeholder="Paste key here (optional if set in secrets)",
+            help="Used for live ZIP fetches. Prefer Streamlit secrets for production.",
+        )
+        if has_configured and not str(st.session_state.get("rentcast_api_key_input", "")).strip():
+            st.caption("Using API key from Streamlit secrets / environment.")
+        elif _rentcast_key():
+            st.caption("API key ready for live searches.")
+        else:
+            st.caption("Cached ZIP searches work without a key.")
 
-    st.divider()
-    st.subheader("Search a ZIP with your API key")
-    api_zip = st.text_input(
-        "ZIP code to fetch",
-        max_chars=5,
-        key="api_zip_input",
-        placeholder="e.g. 29212",
-        help="Downloads this ZIP from RentCast and adds it to the ZIP list above.",
-    ).strip()
-    fetch_clicked = st.button(
-        "Fetch from RentCast",
-        use_container_width=True,
-        disabled=not bool(api_zip),
-    )
-    st.caption("Uses one API request per ZIP. Cached ZIPs above are free.")
+        st.divider()
+        api_zip = st.text_input(
+            "ZIP code to fetch",
+            max_chars=5,
+            key="api_zip_input",
+            placeholder="e.g. 29212",
+            help="Downloads this ZIP from RentCast and adds it to the ZIP list above.",
+        ).strip()
+        fetch_clicked = st.button(
+            "Fetch from RentCast",
+            use_container_width=True,
+            disabled=not bool(api_zip),
+        )
+        st.caption("Uses one API request per ZIP. Cached ZIPs above are free.")
 
 if fetch_clicked:
     try:
@@ -454,7 +461,10 @@ link_frame["Baths"] = link_frame["Baths"].map(
 )
 
 st.subheader("Matching properties")
-st.caption("Click an address to open that home on Zillow.")
+st.caption(
+    "Click an address to open that home on Zillow. "
+    "Estimated values can be way off — treat them as a rough filter only."
+)
 table_html = link_frame.to_html(
     escape=False, index=False, border=0, classes="house-table"
 )
