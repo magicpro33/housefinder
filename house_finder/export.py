@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 from house_finder.models import House
 
@@ -30,3 +31,17 @@ def format_houses_report(
             f"${house.estimated_value:,}\t{house.latitude}\t{house.longitude}"
         )
     return "\n".join(lines) + "\n"
+
+
+def save_houses_to_file(
+    path: Path,
+    houses: list[House],
+    *,
+    zip_code: str = "",
+    source: str = "",
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        format_houses_report(houses, zip_code=zip_code, source=source),
+        encoding="utf-8",
+    )

@@ -54,6 +54,7 @@ def monthly_limit() -> int:
 
 
 def monthly_limit_hint() -> int | None:
+    """Limit shown in UI; 0 in .env hides the '/ N' hint."""
     raw = os.environ.get("RENTCAST_MONTHLY_LIMIT", "50").strip()
     if not raw or raw == "0":
         return None
@@ -61,6 +62,11 @@ def monthly_limit_hint() -> int | None:
 
 
 def record_rentcast_request(path: Path | None = None) -> tuple[int, bool]:
+    """
+    Count one RentCast HTTP request for the current calendar month.
+
+    Returns (new_count, should_show_limit_notice).
+    """
     state = load_usage(path)
     state["count"] = int(state.get("count", 0)) + 1
     limit = monthly_limit()
@@ -69,15 +75,15 @@ def record_rentcast_request(path: Path | None = None) -> tuple[int, bool]:
     return int(state["count"]), notify
 
 
+def should_show_limit_notice(path: Path | None = None) -> bool:
+    state = load_usage(path)
+    return state["count"] >= monthly_limit() and not state.get("limit_notice_shown", False)
+
+
 def mark_limit_notice_shown(path: Path | None = None) -> None:
     state = load_usage(path)
     state["limit_notice_shown"] = True
     save_usage(state, path)
-
-
-def should_show_limit_notice(path: Path | None = None) -> bool:
-    state = load_usage(path)
-    return state["count"] >= monthly_limit() and not state.get("limit_notice_shown", False)
 
 
 def get_month_usage(path: Path | None = None) -> tuple[str, int]:

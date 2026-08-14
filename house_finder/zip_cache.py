@@ -1,11 +1,35 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "cache"
+
+
+@dataclass(frozen=True)
+class CachedZipInfo:
+    zip_code: str
+    fetched_at: str
+    record_count: int
+
+    @property
+    def fetched_display(self) -> str:
+        raw = self.fetched_at
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            local = dt.astimezone()
+            return local.strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            return raw[:16] if len(raw) > 16 else raw
+
+    @property
+    def summary(self) -> str:
+        return f"{self.record_count} records · cached {self.fetched_display}"
 
 
 def _cache_path(zip_code: str) -> Path:
@@ -44,3 +68,46 @@ def save_cached_records(zip_code: str, records: list[dict[str, Any]]) -> None:
     }
     path = _cache_path(zip_code)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def cache_summary(zip_code: str) -> str | None:
+    info = get_cached_zip_info(zip_code)
+    if info is None:
+        return None
+    return f"cached {info.record_count} records from {info.fetched_at}"
+
+
+def get_cached_zip_info(zip_code: str) -> CachedZipInfo | None:
+    path = _cache_path(zip_code)
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    records = payload.get("records")
+    count = payload.get("record_count")
+    if not isinstance(count, int):
+        count = len(records) if isinstance(records, list) else 0
+    return CachedZipInfo(
+        zip_code=zip_code.strip(),
+        fetched_at=str(payload.get("fetched_at", "unknown")),
+        record_count=count,
+    )
+
+
+def list_cached_zips() -> list[CachedZipInfo]:
+    """Return metadata for every zip code saved under data/cache/."""
+    if not CACHE_DIR.is_dir():
+        return []
+    results: list[CachedZipInfo] = []
+    for path in CACHE_DIR.glob("*.json"):
+        zip_code = path.stem
+        if len(zip_code) != 5 or not zip_code.isdigit():
+            continue
+        info = get_cached_zip_info(zip_code)
+        if info is not None:
+            results.append(info)
+    return sorted(results, key=lambda item: item.zip_code)

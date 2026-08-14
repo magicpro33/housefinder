@@ -11,16 +11,105 @@ from house_finder.zip_cache import load_cached_records, save_cached_records
 
 RENTCAST_BASE = "https://api.rentcast.io/v1"
 
+# When tax/assessment ratio exceeds this, the county value is likely missing trailing zeros.
+_MAX_TAX_TO_ASSESSMENT = 0.05
+# Minimum plausible $/sqft after scaling (rural manufactured homes can be ~$10–15/sqft).
+_MIN_SQFT_VALUE = 10
 
-def _estimated_value(record: dict[str, Any]) -> int:
+
+def _latest_sale_price(record: dict[str, Any]) -> int | None:
     if record.get("lastSalePrice"):
         return int(record["lastSalePrice"])
+    history = record.get("history") or {}
+    dated: list[tuple[str, int]] = []
+    for key, entry in history.items():
+        if not isinstance(entry, dict):
+            continue
+        price = entry.get("price")
+        if price:
+            dated.append((str(key), int(price)))
+    if not dated:
+        return None
+    dated.sort(key=lambda item: item[0], reverse=True)
+    return dated[0][1]
+
+
+def _latest_tax_assessment(record: dict[str, Any]) -> tuple[int, str | None]:
     assessments = record.get("taxAssessments") or {}
-    if assessments:
-        latest = max(assessments.keys(), key=lambda y: int(y))
-        value = assessments[latest].get("value")
-        if value:
-            return int(value)
+    if not assessments:
+        return 0, None
+    latest_year = max(assessments.keys(), key=lambda y: int(y))
+    entry = assessments[latest_year]
+    if not isinstance(entry, dict):
+        return 0, None
+    value = entry.get("value")
+    if not value:
+        return 0, None
+    return int(value), str(latest_year)
+
+
+def _property_tax_for_year(record: dict[str, Any], year: str | None) -> float | None:
+    if not year:
+        return None
+    taxes = record.get("propertyTaxes") or {}
+    entry = taxes.get(year)
+    if entry is None:
+        entry = taxes.get(int(year))
+    if not isinstance(entry, dict):
+        return None
+    total = entry.get("total")
+    return float(total) if total else None
+
+
+def _scale_assessment(raw: int, record: dict[str, Any], year: str | None) -> int:
+    """
+    Normalize tax assessments that counties report at the wrong scale.
+
+    Some assessors (especially for manufactured homes in SC) store values like 132 or
+    12050 when the real assessed amount should be 13200 or 120500. When property tax
+    data exists for the same year, we infer the correction from the tax/assessment ratio.
+    """
+    if raw <= 0:
+        return 0
+
+    tax_total = _property_tax_for_year(record, year)
+    if tax_total and tax_total > 0:
+        rate = tax_total / raw
+        if rate <= _MAX_TAX_TO_ASSESSMENT:
+            return raw
+        multiplier = 1
+        while rate > _MAX_TAX_TO_ASSESSMENT and multiplier < 10_000:
+            multiplier *= 10
+            rate = tax_total / (raw * multiplier)
+        if multiplier > 1:
+            return int(raw * multiplier)
+
+    sqft = record.get("squareFootage")
+    if not sqft or int(sqft) <= 0:
+        return raw
+
+    sqft = int(sqft)
+    if raw / sqft >= _MIN_SQFT_VALUE:
+        return raw
+
+    max_multiplier = 100 if raw < 1000 else 1000
+    multiplier = 1
+    while multiplier < max_multiplier and (raw * multiplier) / sqft < _MIN_SQFT_VALUE:
+        multiplier *= 10
+    scaled = int(raw * multiplier)
+    if scaled / sqft >= _MIN_SQFT_VALUE:
+        return scaled
+    return raw
+
+
+def _estimated_value(record: dict[str, Any]) -> int:
+    sale = _latest_sale_price(record)
+    if sale and sale > 0:
+        return sale
+
+    raw, year = _latest_tax_assessment(record)
+    if raw > 0:
+        return _scale_assessment(raw, record, year)
     return 0
 
 
@@ -70,6 +159,11 @@ def fetch_properties_by_zip(
     log: Any = print,
     force_refresh: bool = False,
 ) -> tuple[list[House], bool, bool]:
+    """
+    Fetch property records for a US zip code via RentCast.
+
+    Returns (houses, from_cache, api_limit_notify). Cached zips do not call the API.
+    """
     zip_code = zip_code.strip()
 
     if not force_refresh:
