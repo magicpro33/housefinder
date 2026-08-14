@@ -14,6 +14,8 @@ class CachedZipInfo:
     zip_code: str
     fetched_at: str
     record_count: int
+    city: str = ""
+    state: str = ""
 
     @property
     def fetched_display(self) -> str:
@@ -28,8 +30,33 @@ class CachedZipInfo:
             return raw[:16] if len(raw) > 16 else raw
 
     @property
+    def location_label(self) -> str:
+        if self.city and self.state:
+            return f"{self.city}, {self.state}"
+        return self.city or self.state or ""
+
+    @property
     def summary(self) -> str:
-        return f"{self.record_count} records · cached {self.fetched_display}"
+        loc = f"{self.location_label} · " if self.location_label else ""
+        return f"{loc}{self.record_count} records · cached {self.fetched_display}"
+
+
+def _majority_location(records: list[dict[str, Any]]) -> tuple[str, str]:
+    """Return the most common city/state pair from cached property records."""
+    counts: dict[tuple[str, str], int] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        city = str(record.get("city") or "").strip()
+        state = str(record.get("state") or "").strip()
+        if not city and not state:
+            continue
+        key = (city, state)
+        counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        return "", ""
+    city, state = max(counts.items(), key=lambda item: item[1])[0]
+    return city, state
 
 
 def _cache_path(zip_code: str) -> Path:
@@ -91,10 +118,15 @@ def get_cached_zip_info(zip_code: str) -> CachedZipInfo | None:
     count = payload.get("record_count")
     if not isinstance(count, int):
         count = len(records) if isinstance(records, list) else 0
+    city, state = "", ""
+    if isinstance(records, list):
+        city, state = _majority_location(records)
     return CachedZipInfo(
         zip_code=zip_code.strip(),
         fetched_at=str(payload.get("fetched_at", "unknown")),
         record_count=count,
+        city=city,
+        state=state,
     )
 
 
