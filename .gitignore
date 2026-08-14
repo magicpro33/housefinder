@@ -10,8 +10,10 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
-# App runtime data (cache, API counters — local only)
-data/
+# App runtime data — keep ZIP dumps tracked for Streamlit Cloud
+data/api_usage.json
+data/cache/*
+!data/cache/*.json
 
 # OS / editor
 .DS_Store
