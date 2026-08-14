@@ -260,8 +260,9 @@ def _inject_mobile_css() -> None:
         }
         /* Slightly tighter Streamlit chrome on small screens */
         @media (max-width: 768px) {
+          /* Must clear Streamlit's fixed top header (~60px) or the logo hides behind it. */
           .block-container {
-            padding-top: 0.75rem !important;
+            padding-top: 4.5rem !important;
             padding-left: 0.7rem !important;
             padding-right: 0.7rem !important;
             padding-bottom: 2rem !important;
