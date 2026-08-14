@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import html
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
@@ -20,6 +22,18 @@ CREATOR_URL = "https://aiupscalellc.netlify.app/"
 load_dotenv(ROOT / ".env")
 
 st.set_page_config(page_title="House Finder", page_icon="🏠", layout="wide")
+
+
+def _zillow_url(address: str, city: str = "", state: str = "", zip_code: str = "") -> str:
+    """Build a Zillow homes search URL for a street address."""
+    full = ", ".join(
+        part for part in (
+            str(address or "").strip(),
+            str(city or "").strip(),
+            f"{str(state or '').strip()} {str(zip_code or '').strip()}".strip(),
+        ) if part
+    )
+    return f"https://www.zillow.com/homes/{quote(full)}_rb/"
 
 
 def _configured_api_key() -> str:
@@ -75,6 +89,9 @@ def _houses_frame(houses: list[House]) -> pd.DataFrame:
         rows.append(
             {
                 "Address": house.address,
+                "Zillow": _zillow_url(
+                    house.address, house.city, house.state, house.zip_code
+                ),
                 "City": house.city,
                 "State": house.state,
                 "ZIP": house.zip_code,
@@ -267,20 +284,42 @@ map_frame = frame.rename(columns={"Latitude": "lat", "Longitude": "lon"})
 st.map(map_frame[["lat", "lon"]], use_container_width=True, height=420)
 
 display_frame = frame.drop(columns=["Latitude", "Longitude"])
-st.subheader("Matching properties")
-st.dataframe(
-    display_frame,
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "Estimated value": st.column_config.NumberColumn(format="$%,d"),
-        "Age": st.column_config.NumberColumn(format="%d years"),
-    },
+# Address text links to Zillow (Streamlit dataframe cannot label LinkColumn per-row).
+link_frame = display_frame.drop(columns=["Zillow"]).copy()
+link_frame["Address"] = [
+    f'<a href="{html.escape(str(url), quote=True)}" target="_blank" '
+    f'rel="noopener noreferrer" style="color:#4da3ff;text-decoration:underline;">'
+    f"{html.escape(str(addr))}</a>"
+    for addr, url in zip(display_frame["Address"], display_frame["Zillow"])
+]
+
+# Format currency/age for the HTML table
+link_frame["Estimated value"] = link_frame["Estimated value"].map(
+    lambda v: f"${int(v):,}" if pd.notna(v) else "—"
 )
 
+st.subheader("Matching properties")
+st.caption("Click an address to open that home on Zillow.")
+table_html = link_frame.to_html(escape=False, index=False, classes="house-table")
+st.markdown(
+    """
+    <style>
+    .house-table {width:100%; border-collapse:collapse; font-size:0.9rem;}
+    .house-table th {position:sticky; top:0; background:#0c1829; color:#F6F4E9;
+                     text-align:left; padding:8px; border-bottom:1px solid #334;}
+    .house-table td {padding:8px; border-bottom:1px solid #1c2a3f; color:#F6F4E9;}
+    .house-table tr:hover td {background:#122038;}
+    </style>
+    """
+    f'<div style="max-height:520px;overflow:auto;border:1px solid #233;border-radius:8px;">'
+    f"{table_html}</div>",
+    unsafe_allow_html=True,
+)
+
+csv_frame = display_frame.drop(columns=["Zillow"])
 st.download_button(
     "Download results as CSV",
-    data=display_frame.to_csv(index=False).encode("utf-8"),
+    data=csv_frame.to_csv(index=False).encode("utf-8"),
     file_name=f"house-finder-{search_zip}.csv",
     mime="text/csv",
 )
