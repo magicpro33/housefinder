@@ -7,9 +7,11 @@ import os
 from pathlib import Path
 from urllib.parse import quote
 
+import folium
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
+from streamlit_folium import st_folium
 
 from house_finder.models import House
 from house_finder.search import search_houses
@@ -83,6 +85,17 @@ def _cache_dir_signature() -> str:
     return "|".join(parts) or "empty"
 
 
+def _street_label(address: str) -> str:
+    """Short street text for map markers."""
+    text = str(address or "").strip()
+    # Prefer the street line before the city when formattedAddress is used.
+    if "," in text:
+        text = text.split(",", 1)[0].strip()
+    if len(text) > 36:
+        text = text[:33] + "…"
+    return text or "Home"
+
+
 def _houses_frame(houses: list[House]) -> pd.DataFrame:
     rows = []
     for house in houses:
@@ -135,6 +148,71 @@ def _run_search(
     st.session_state.search_zip = zip_code
     st.session_state.search_logs = logs
     st.session_state.api_limit_notice = api_limit_notice
+    st.session_state.search_fingerprint = (
+        zip_code,
+        min_age,
+        max_age,
+        min_value,
+        max_value,
+        force_refresh,
+    )
+
+
+def _build_folium_map(houses: list[House]) -> folium.Map:
+    """Map with large permanent street-name labels on each pin."""
+    lats = [h.latitude for h in houses]
+    lons = [h.longitude for h in houses]
+    center = [sum(lats) / len(lats), sum(lons) / len(lons)]
+    fmap = folium.Map(location=center, zoom_start=13, tiles="OpenStreetMap")
+
+    # Slightly higher default zoom so basemap street names render larger.
+    if len(houses) == 1:
+        fmap = folium.Map(location=center, zoom_start=16, tiles="OpenStreetMap")
+
+    for house in houses:
+        label = _street_label(house.address)
+        tip_html = (
+            f'<div style="font-size:14px;font-weight:700;line-height:1.2;">'
+            f"{html.escape(label)}</div>"
+            f'<div style="font-size:12px;">${house.estimated_value:,} · {house.age_years} yr</div>'
+        )
+        popup_html = (
+            f"<b>{html.escape(house.address)}</b><br>"
+            f"{html.escape(house.city)}, {html.escape(house.state)} {html.escape(house.zip_code)}<br>"
+            f"Est. value: ${house.estimated_value:,}<br>"
+            f"Built: {house.year_built} ({house.age_years} years)<br>"
+            f'<a href="{html.escape(_zillow_url(house.address, house.city, house.state, house.zip_code), quote=True)}" '
+            f'target="_blank" rel="noopener noreferrer">Open on Zillow</a>'
+        )
+        folium.Marker(
+            location=[house.latitude, house.longitude],
+            popup=folium.Popup(popup_html, max_width=320),
+            tooltip=folium.Tooltip(tip_html, permanent=True, sticky=False),
+            icon=folium.Icon(color="orange", icon="home", prefix="fa"),
+        ).add_to(fmap)
+
+    # Fit bounds with padding so labels stay readable
+    if len(houses) > 1:
+        fmap.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]], padding=(30, 30))
+
+    # CSS bump for Folium permanent tooltips (street names on map)
+    fmap.get_root().html.add_child(
+        folium.Element(
+            """
+            <style>
+            .leaflet-tooltip {
+              font-size: 14px !important;
+              font-weight: 700 !important;
+              padding: 6px 8px !important;
+              border-radius: 6px !important;
+              box-shadow: 0 2px 8px rgba(0,0,0,.25) !important;
+              opacity: 0.95 !important;
+            }
+            </style>
+            """
+        )
+    )
+    return fmap
 
 
 def _clickable_logo_html(path: Path, url: str, *, max_width: int = 220) -> str:
@@ -171,7 +249,7 @@ with st.sidebar:
         selected_label = st.selectbox(
             "ZIP code to search",
             options=labels,
-            help="Loaded from data/cache/*.json",
+            help="Loads automatically when you change ZIP or filters.",
         )
         zip_code = zip_by_label[selected_label]
         info = get_cached_zip_info(zip_code)
@@ -179,7 +257,6 @@ with st.sidebar:
             st.caption(f"Location: **{info.location_label}**")
     else:
         zip_code = ""
-        selected_label = ""
         st.warning("No cached ZIP files found in data/cache.")
         zip_code = st.text_input("ZIP code", max_chars=5).strip()
 
@@ -215,21 +292,23 @@ with st.sidebar:
         help="Requires an API key. Replaces the cached dump for this ZIP on this host.",
     )
 
-    submitted = st.button(
-        "Search homes",
-        type="primary",
-        use_container_width=True,
-        disabled=not bool(zip_code),
-    )
+# Auto-load whenever ZIP or filters change (no Search button).
+fingerprint = (
+    zip_code,
+    age_range[0],
+    age_range[1],
+    value_range[0],
+    value_range[1],
+    force_refresh,
+)
+needs_load = bool(zip_code) and st.session_state.get("search_fingerprint") != fingerprint
 
-if submitted:
-    if not zip_code:
-        st.error("Select a ZIP code to search.")
-    elif force_refresh and not _rentcast_key():
+if needs_load:
+    if force_refresh and not _rentcast_key():
         st.error("Enter a RentCast API key (or set RENTCAST_API_KEY in secrets) to refresh.")
     else:
         try:
-            with st.spinner(f"Searching ZIP {zip_code}…"):
+            with st.spinner(f"Loading ZIP {zip_code}…"):
                 _run_search(
                     zip_code,
                     age_range[0],
@@ -238,16 +317,17 @@ if submitted:
                     value_range[1],
                     force_refresh=force_refresh,
                 )
-                # Bust zip-label cache after a refresh so location stays current
                 if force_refresh:
                     _cached_zip_options.clear()
         except ValueError as exc:
             st.error(str(exc))
+            st.stop()
         except Exception as exc:
             st.exception(exc)
+            st.stop()
 
 if "search_results" not in st.session_state:
-    st.info("Choose a ZIP code in the sidebar, then click **Search homes**.")
+    st.info("Choose a ZIP code in the sidebar — results load automatically.")
     st.stop()
 
 results: list[House] = st.session_state.search_results
@@ -270,7 +350,7 @@ if st.session_state.get("search_logs"):
         st.code("\n".join(st.session_state.search_logs), language=None)
 
 if not results:
-    st.info("No homes match those filters. Widen the age or value range and search again.")
+    st.info("No homes match those filters. Widen the age or value range.")
     st.stop()
 
 frame = _houses_frame(results).sort_values(["Estimated value", "Address"])
@@ -280,11 +360,11 @@ summary_cols[1].metric("Median value", f"${frame['Estimated value'].median():,.0
 summary_cols[2].metric("Median age", f"{frame['Age'].median():,.0f} years")
 summary_cols[3].metric("Location", location or search_zip)
 
-map_frame = frame.rename(columns={"Latitude": "lat", "Longitude": "lon"})
-st.map(map_frame[["lat", "lon"]], use_container_width=True, height=420)
+st.subheader("Map")
+st.caption("Street names are shown as large labels on each pin. Zoom in for larger basemap names.")
+st_folium(_build_folium_map(results), width=None, height=480, returned_objects=[])
 
 display_frame = frame.drop(columns=["Latitude", "Longitude"])
-# Address text links to Zillow (Streamlit dataframe cannot label LinkColumn per-row).
 link_frame = display_frame.drop(columns=["Zillow"]).copy()
 link_frame["Address"] = [
     f'<a href="{html.escape(str(url), quote=True)}" target="_blank" '
@@ -292,8 +372,6 @@ link_frame["Address"] = [
     f"{html.escape(str(addr))}</a>"
     for addr, url in zip(display_frame["Address"], display_frame["Zillow"])
 ]
-
-# Format currency/age for the HTML table
 link_frame["Estimated value"] = link_frame["Estimated value"].map(
     lambda v: f"${int(v):,}" if pd.notna(v) else "—"
 )

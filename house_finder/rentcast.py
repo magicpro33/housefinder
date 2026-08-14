@@ -12,9 +12,12 @@ from house_finder.zip_cache import load_cached_records, save_cached_records
 RENTCAST_BASE = "https://api.rentcast.io/v1"
 
 # When tax/assessment ratio exceeds this, the county value is likely missing trailing zeros.
-_MAX_TAX_TO_ASSESSMENT = 0.05
+# SC effective property-tax rates are often ~0.5–2% of market; 5% stopped scaling too early.
+_MAX_TAX_TO_ASSESSMENT = 0.02
 # Minimum plausible $/sqft after scaling (rural manufactured homes can be ~$10–15/sqft).
 _MIN_SQFT_VALUE = 10
+# If last-sale is far below a scaled tax assessment, prefer the assessment.
+_SALE_VS_ASSESSMENT_FLOOR = 0.45
 
 
 def _latest_sale_price(record: dict[str, Any]) -> int | None:
@@ -103,14 +106,18 @@ def _scale_assessment(raw: int, record: dict[str, Any], year: str | None) -> int
 
 
 def _estimated_value(record: dict[str, Any]) -> int:
-    sale = _latest_sale_price(record)
-    if sale and sale > 0:
-        return sale
-
+    sale = _latest_sale_price(record) or 0
     raw, year = _latest_tax_assessment(record)
-    if raw > 0:
-        return _scale_assessment(raw, record, year)
-    return 0
+    assessed = _scale_assessment(raw, record, year) if raw > 0 else 0
+
+    if sale > 0 and assessed > 0:
+        # Prefer assessment when recorded sale is unrealistically low vs tax-implied value.
+        if sale < assessed * _SALE_VS_ASSESSMENT_FLOOR:
+            return assessed
+        return max(sale, assessed)
+    if sale > 0:
+        return sale
+    return assessed
 
 
 def _parse_record(record: dict[str, Any]) -> House | None:
