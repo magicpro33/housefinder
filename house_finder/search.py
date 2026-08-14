@@ -23,17 +23,14 @@ def fetch_houses_in_zip(
     if len(zip_code) != 5 or not zip_code.isdigit():
         raise ValueError("Enter a valid 5-digit US zip code.")
 
-    key = (api_key or os.environ.get("RENTCAST_API_KEY", "")).strip()
-    if not key:
-        raise ValueError(
-            "RentCast API key required. Add RENTCAST_API_KEY to .env or get a free key at "
-            "https://app.rentcast.io/app/api"
-        )
-
     if log:
         log(f"Loading property data for zip {zip_code}…")
+    # Cache hits do not need a key; RentCast validates the key only on live fetch.
     raw, from_cache, api_limit_notify = fetch_properties_by_zip(
-        zip_code, key, log=log, force_refresh=force_refresh
+        zip_code,
+        (api_key or os.environ.get("RENTCAST_API_KEY", "")).strip(),
+        log=log,
+        force_refresh=force_refresh,
     )
     source = "rentcast-cache" if from_cache else "rentcast"
     return raw, source, api_limit_notify

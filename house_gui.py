@@ -1,16 +1,28 @@
 #!/usr/bin/env python3
-"""GUI: find homes by zip, age, and estimated value with an interactive map."""
+"""GUI: find homes by zip, age, and estimated value with an interactive map.
+
+On Streamlit Cloud (no Tk), this file falls through to streamlit_app.py so an
+app still pointed at house_gui.py keeps working. Prefer streamlit_app.py as the
+Streamlit main file.
+"""
 
 from __future__ import annotations
 
 import math
 import queue
+import runpy
 import threading
 import webbrowser
-import tkinter as tk
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+
+try:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, scrolledtext, ttk
+except ImportError:
+    # Headless hosts (Streamlit Cloud) do not ship Tk — run the web UI instead.
+    runpy.run_path(str(Path(__file__).resolve().parent / "streamlit_app.py"), run_name="__main__")
+    raise SystemExit(0) from None
 
 from dotenv import load_dotenv
 
