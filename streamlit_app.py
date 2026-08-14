@@ -154,7 +154,6 @@ def _run_search(
         max_age,
         min_value,
         max_value,
-        force_refresh,
     )
 
 
@@ -215,6 +214,38 @@ def _build_folium_map(houses: list[House]) -> folium.Map:
     return fmap
 
 
+def _render_html(markup: str) -> None:
+    """Render raw HTML.
+
+    Markdown treats indented lines as code blocks, and pandas to_html emits
+    indented markup, so collapse everything to a single line first.
+    """
+    collapsed = "".join(line.strip() for line in markup.splitlines())
+    render = getattr(st, "html", None)
+    if callable(render):
+        render(collapsed)
+    else:
+        st.markdown(collapsed, unsafe_allow_html=True)
+
+
+def _fetch_zip_from_api(zip_code: str) -> tuple[bool, str]:
+    """Pull a ZIP from RentCast and write it to the local cache."""
+    from house_finder.rentcast import fetch_properties_by_zip
+
+    key = _rentcast_key()
+    if not key:
+        return False, "Enter a RentCast API key first."
+    if len(zip_code) != 5 or not zip_code.isdigit():
+        return False, "Enter a valid 5-digit ZIP code."
+    houses, _from_cache, api_limit_notify = fetch_properties_by_zip(
+        zip_code, key, log=None, force_refresh=True
+    )
+    st.session_state.api_limit_notice = api_limit_notify
+    if not houses:
+        return False, f"RentCast returned no usable properties for {zip_code}."
+    return True, f"Fetched {len(houses)} homes for {zip_code}."
+
+
 def _clickable_logo_html(path: Path, url: str, *, max_width: int = 220) -> str:
     import base64
 
@@ -246,9 +277,12 @@ labels = [label for _, label in zip_options]
 with st.sidebar:
     st.header("Search")
     if labels:
+        if st.session_state.get("zip_select") not in labels:
+            st.session_state.zip_select = labels[0]
         selected_label = st.selectbox(
             "ZIP code to search",
             options=labels,
+            key="zip_select",
             help="Loads automatically when you change ZIP or filters.",
         )
         zip_code = zip_by_label[selected_label]
@@ -286,11 +320,49 @@ with st.sidebar:
     else:
         st.caption("Cached ZIP searches work without a key.")
 
-    force_refresh = st.checkbox(
-        "Refresh this ZIP from RentCast API",
-        value=False,
-        help="Requires an API key. Replaces the cached dump for this ZIP on this host.",
+    st.divider()
+    st.subheader("Search a ZIP with your API key")
+    api_zip = st.text_input(
+        "ZIP code to fetch",
+        max_chars=5,
+        key="api_zip_input",
+        placeholder="e.g. 29212",
+        help="Downloads this ZIP from RentCast and adds it to the ZIP list above.",
+    ).strip()
+    fetch_clicked = st.button(
+        "Fetch from RentCast",
+        use_container_width=True,
+        disabled=not bool(api_zip),
     )
+    st.caption("Uses one API request per ZIP. Cached ZIPs above are free.")
+
+if fetch_clicked:
+    try:
+        with st.spinner(f"Fetching ZIP {api_zip} from RentCast…"):
+            ok, message = _fetch_zip_from_api(api_zip)
+    except ValueError as exc:
+        ok, message = False, str(exc)
+    except Exception as exc:  # network/API failures
+        ok, message = False, f"RentCast request failed: {exc}"
+
+    if ok:
+        _cached_zip_options.clear()
+        st.session_state.pop("search_fingerprint", None)
+        info = get_cached_zip_info(api_zip)
+        if info:
+            st.session_state.zip_select = (
+                f"{info.zip_code} — {info.location_label}"
+                if info.location_label
+                else info.zip_code
+            )
+        st.session_state.fetch_notice = message
+        st.rerun()
+    else:
+        st.error(message)
+
+fetch_notice = st.session_state.pop("fetch_notice", "")
+if fetch_notice:
+    st.success(fetch_notice)
 
 # Auto-load whenever ZIP or filters change (no Search button).
 fingerprint = (
@@ -299,32 +371,26 @@ fingerprint = (
     age_range[1],
     value_range[0],
     value_range[1],
-    force_refresh,
 )
 needs_load = bool(zip_code) and st.session_state.get("search_fingerprint") != fingerprint
 
 if needs_load:
-    if force_refresh and not _rentcast_key():
-        st.error("Enter a RentCast API key (or set RENTCAST_API_KEY in secrets) to refresh.")
-    else:
-        try:
-            with st.spinner(f"Loading ZIP {zip_code}…"):
-                _run_search(
-                    zip_code,
-                    age_range[0],
-                    age_range[1],
-                    value_range[0],
-                    value_range[1],
-                    force_refresh=force_refresh,
-                )
-                if force_refresh:
-                    _cached_zip_options.clear()
-        except ValueError as exc:
-            st.error(str(exc))
-            st.stop()
-        except Exception as exc:
-            st.exception(exc)
-            st.stop()
+    try:
+        with st.spinner(f"Loading ZIP {zip_code}…"):
+            _run_search(
+                zip_code,
+                age_range[0],
+                age_range[1],
+                value_range[0],
+                value_range[1],
+                force_refresh=False,
+            )
+    except ValueError as exc:
+        st.error(str(exc))
+        st.stop()
+    except Exception as exc:
+        st.exception(exc)
+        st.stop()
 
 if "search_results" not in st.session_state:
     st.info("Choose a ZIP code in the sidebar — results load automatically.")
@@ -378,20 +444,19 @@ link_frame["Estimated value"] = link_frame["Estimated value"].map(
 
 st.subheader("Matching properties")
 st.caption("Click an address to open that home on Zillow.")
-table_html = link_frame.to_html(escape=False, index=False, classes="house-table")
-st.markdown(
-    """
-    <style>
-    .house-table {width:100%; border-collapse:collapse; font-size:0.9rem;}
-    .house-table th {position:sticky; top:0; background:#0c1829; color:#F6F4E9;
-                     text-align:left; padding:8px; border-bottom:1px solid #334;}
-    .house-table td {padding:8px; border-bottom:1px solid #1c2a3f; color:#F6F4E9;}
-    .house-table tr:hover td {background:#122038;}
-    </style>
-    """
-    f'<div style="max-height:520px;overflow:auto;border:1px solid #233;border-radius:8px;">'
-    f"{table_html}</div>",
-    unsafe_allow_html=True,
+table_html = link_frame.to_html(
+    escape=False, index=False, border=0, classes="house-table"
+)
+_render_html(
+    "<style>"
+    ".house-table{width:100%;border-collapse:collapse;font-size:0.9rem;}"
+    ".house-table th{position:sticky;top:0;background:#0c1829;color:#F6F4E9;"
+    "text-align:left;padding:8px;border-bottom:1px solid #334;white-space:nowrap;}"
+    ".house-table td{padding:8px;border-bottom:1px solid #1c2a3f;color:#F6F4E9;}"
+    ".house-table tr:hover td{background:#122038;}"
+    ".house-scroll{max-height:520px;overflow:auto;border:1px solid #233;border-radius:8px;}"
+    "</style>"
+    f'<div class="house-scroll">{table_html}</div>'
 )
 
 csv_frame = display_frame.drop(columns=["Zillow"])
